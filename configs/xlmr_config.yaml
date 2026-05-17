@@ -1,0 +1,139 @@
+# XLM-RoBERTa Fine-Tuning Configuration
+# xlm-roberta-base across 8 languages
+# Effective batch size: 8 (per_device) * 16 (grad_accum) = 128
+# Lower LR than mBERT due to larger pretraining corpus
+
+model:
+  name: xlm-roberta-base
+  num_labels: 3
+  label_names:
+    - negative
+    - neutral
+    - positive
+  dropout_prob: 0.1
+  use_gradient_checkpointing: false
+  freeze_encoder_layers: 0  # Fine-tune all layers
+  output_attentions: false   # Set true for interpretability analysis
+
+tokenizer:
+  max_length: 128
+  padding: true
+  truncation: true
+  pad_to_multiple_of: 8
+
+training:
+  run_name: xlmr-sentiment-v1
+  output_dir: models/xlmr-finetuned
+  logging_dir: logs/xlmr
+
+  # Batching
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 16
+  gradient_accumulation_steps: 16   # effective_batch = 8 * 16 = 128
+
+  # Mixed precision
+  fp16: true
+  bf16: false
+
+  # Optimization — XLM-R uses lower LR for stability
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  adam_epsilon: 1.0e-8
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  max_grad_norm: 1.0
+  optim: adamw_torch
+
+  # Layer-wise LR decay
+  # XLM-R: 12 layers; embeddings get ~0.9^12 * 1e-5 ≈ 0.28e-5
+  # Top layers (classifier) get full 1e-5
+  layer_wise_lr_decay: 0.9
+
+  # Schedule: cosine annealing with 10% linear warmup
+  num_train_epochs: 4   # XLM-R converges faster than mBERT
+  warmup_ratio: 0.1
+  lr_scheduler_type: cosine
+
+  # Evaluation & logging
+  eval_strategy: steps
+  eval_steps: 500
+  logging_steps: 100
+  logging_first_step: true
+
+  # Saving
+  save_strategy: steps
+  save_steps: 1000
+  save_total_limit: 3
+  load_best_model_at_end: true
+  metric_for_best_model: eval_f1
+  greater_is_better: true
+
+  # Reproducibility
+  seed: 42
+  data_seed: 42
+
+  # Efficiency
+  dataloader_num_workers: 4
+  dataloader_pin_memory: true
+  gradient_checkpointing: false
+
+data:
+  languages:
+    - en
+    - de
+    - fr
+    - es
+    - zh
+    - ar
+    - sw
+    - ta
+  zero_shot_eval_languages:
+    - ru
+    - hi
+    - bg
+    - el
+    - th
+    - tr
+    - ur
+  include_zero_shot_eval: true
+  val_ratio: 0.1
+  test_ratio: 0.1
+  cache_dir: null
+
+wandb:
+  use_wandb: true
+  project: multilingual-sentiment
+  entity: null  # Set to your W&B username or team
+  report_to: wandb
+  tags:
+    - xlmr
+    - xlm-roberta
+    - xnli
+    - multilingual
+    - sentiment
+
+tapt:
+  # TAPT provides +8.3% avg F1 improvement over vanilla fine-tuning
+  enabled: false
+  mlm_probability: 0.15
+  tapt_epochs: 3
+  tapt_lr: 5.0e-5
+  per_device_batch_size: 16
+  gradient_accumulation_steps: 4
+  tapt_output_dir: models/xlmr-tapt-adapted
+
+evaluation:
+  benchmark_on_xnli: true
+  benchmark_zero_shot: true
+  compare_with_mbert: true
+  save_predictions: true
+  predictions_dir: outputs/xlmr-predictions
+  report_path: reports/xlmr_benchmark.json
+
+serving:
+  # FastAPI / Lambda serving configuration
+  max_length: 128
+  batch_size: 32
+  device: cpu      # cpu for Lambda, cuda for GPU server
+  fp16: false      # Enable if deploying on CUDA
+  max_batch_texts: 512
